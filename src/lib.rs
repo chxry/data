@@ -1,7 +1,11 @@
+#![feature(pointer_byte_offsets)]
 use std::thread;
+use std::mem::size_of;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::fs::File;
+use std::path::Path;
 use std::error::Error;
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -9,7 +13,7 @@ use serde::{Serialize, de::DeserializeOwned};
 pub struct Database<T>(Arc<RwLock<Inner<T>>>);
 
 impl<T: Serialize + DeserializeOwned + Default + Send + Sync + 'static> Database<T> {
-  pub fn new(path: String) -> Result<Self, Box<dyn Error>> {
+  pub fn new<P: AsRef<Path> + Clone + Send + 'static>(path: P) -> Result<Self, Box<dyn Error>> {
     let db = Arc::new(RwLock::new(Inner {
       dirty: false,
       data: match File::open(path.clone()) {
@@ -19,10 +23,16 @@ impl<T: Serialize + DeserializeOwned + Default + Send + Sync + 'static> Database
     }));
     let d = db.clone();
     thread::spawn(move || loop {
-      let r = db.read().unwrap();
+      let r = unsafe {
+        &mut *UnsafeCell::<Inner<T>>::raw_get(
+          Arc::as_ptr(&db)
+            .byte_add(size_of::<RwLock<Inner<T>>>() - size_of::<UnsafeCell<Inner<T>>>())
+            as _,
+        )
+      };
       if r.dirty {
         bincode::serialize_into(File::create(path.clone()).unwrap(), &r.data).unwrap();
-        db.write().unwrap().dirty = false;
+        r.dirty = false
       }
     });
     Ok(Self(d))
@@ -86,7 +96,7 @@ mod test {
 
   #[test]
   fn test() {
-    let db = Database::<Test>::new("test.db".to_string()).unwrap();
+    let db = Database::<Test>::new("test.db").unwrap();
     println!("{}", db.get().a);
     db.get_mut().a = 3;
   }
