@@ -5,6 +5,7 @@ use std::fs::File;
 use std::error::Error;
 use serde::{Serialize, de::DeserializeOwned};
 
+#[derive(Clone)]
 pub struct Database<T>(Arc<RwLock<Inner<T>>>);
 
 impl<T: Serialize + DeserializeOwned + Default + Send + Sync + 'static> Database<T> {
