@@ -6,21 +6,27 @@ use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::fs::File;
 use std::path::Path;
-use std::error::Error;
 use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Clone)]
 pub struct Database<T>(Arc<RwLock<Inner<T>>>);
 
+#[cfg(feature = "bincode")]
 impl<T: Serialize + DeserializeOwned + Default + Send + Sync + 'static> Database<T> {
-  pub fn new<P: AsRef<Path> + Clone + Send + 'static>(path: P) -> Result<Self, Box<dyn Error>> {
-    let db = Arc::new(RwLock::new(Inner {
-      dirty: false,
-      data: match File::open(path.clone()) {
+  pub fn new<P: AsRef<Path> + Clone + Send + 'static>(path: P) -> Result<Self, bincode::Error> {
+    Ok(Self::new_custom(
+      match File::open(path.clone()) {
         Ok(f) => bincode::deserialize_from(f)?,
         Err(_) => T::default(),
       },
-    }));
+      move |data| bincode::serialize_into(File::create(path.clone()).unwrap(), data).unwrap(),
+    ))
+  }
+}
+
+impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Database<T> {
+  pub fn new_custom<S: Fn(&T) + Send + 'static>(data: T, save: S) -> Self {
+    let db = Arc::new(RwLock::new(Inner { dirty: false, data }));
     let d = db.clone();
     thread::spawn(move || loop {
       let r = unsafe {
@@ -31,11 +37,11 @@ impl<T: Serialize + DeserializeOwned + Default + Send + Sync + 'static> Database
         )
       };
       if r.dirty {
-        bincode::serialize_into(File::create(path.clone()).unwrap(), &r.data).unwrap();
+        save(&r.data);
         r.dirty = false
       }
     });
-    Ok(Self(d))
+    Self(d)
   }
 
   pub fn get(&self) -> ReadGuard<T> {

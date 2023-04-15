@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[features]
+default = ["bincode"]
+bincode = ["dep:bincode"]
+
 [dependencies]
 serde = "1.0"
-bincode = "1.3"
+bincode = { version = "1.3", optional = true }
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
